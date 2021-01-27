@@ -4,13 +4,22 @@ import matplotlib.pyplot as plt
 from skimage.draw import disk, rectangle
 import imageio
 import time
+from skimage.util import img_as_ubyte
+from skimage import data
 
 
 class Env():
 
     def __init__(self, n_shapes=1, size=512, frames=100, min_speed=1, max_speed=10, possible_radius=[10], min_jitters=-15, max_jitters=15, max_step=2):
         # Blank image
+
+        noisy_image = img_as_ubyte(data.camera())
+
         self.map = np.zeros((frames, size, size), dtype=np.uint8)
+
+        for i in range(frames):
+            self.map[i] = noisy_image
+
         self.crop_map = np.zeros(
             (frames, int(size/2), int(size/2)), dtype=np.uint8)
         self.jitter_map = np.zeros(
@@ -109,7 +118,7 @@ class Env():
         shape_param['time_step'] = 0
 
         # np.random.randint(0, 255, 1)  # Grayscale
-        shape_param['color'] = 1.
+        shape_param['color'] = 255.
 
         return shape_param
 
@@ -162,14 +171,14 @@ class Env():
 
     def make_gif(self, path, fps=24):
 
-        imageio.mimsave('map_'+path, [255*self.map[i]
+        imageio.mimsave('map_'+path, [self.map[i]
                                       for i in range(self.frames)], format='GIF', fps=fps)
         # imageio.mimsave('cen_'+path, [255*self.crop_map[i]
         #                              for i in range(self.frames)], format='GIF', fps=fps)
         # imageio.mimsave('jit_'+path, [255*self.jitter_map[i]
         #                              for i in range(self.frames)], format='GIF', fps=fps)
         imageio.mimsave(
-            'both_'+path, [255*np.concatenate((self.crop_map[i], self.jitter_map[i]), axis=1) for i in range(self.frames)], format='GIF', fps=fps)
+            'both_'+path, [np.concatenate((self.crop_map[i], self.jitter_map[i]), axis=1) for i in range(self.frames)], format='GIF', fps=fps)
 
     def plot_jitters(self, path):
         plt.figure(figsize=(8, 6))
