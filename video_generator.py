@@ -6,7 +6,9 @@ import imageio
 import time
 from skimage.util import img_as_ubyte
 from skimage import data
-from skimage.transform import EuclideanTransform, rotate
+from skimage.transform import EuclideanTransform, rotate, AffineTransform, warp
+from stabilization import Stabilizer
+from utils import compute_loss
 
 # Class that creates random frames and outputs list of jitters (x,y,r)
 
@@ -38,7 +40,41 @@ class Jitters():
         return {'X': self.jitter_x, 'Y': self.jitter_y, 'R': self.jitter_r}
 
 
+class GaussianJitters():
+    '''The Jitter class creates random movement to apply to frames'''
+
+    def __init__(self, size=1000, freq=2., amplitude=70, amplitude_r=10, freq_r=2, scale=0.01, phi=np.pi/2):
+
+        self.size = size
+        self.freq = freq
+        self.amplitude = amplitude
+        self.amplitude_r = amplitude_r
+        self.freq_r = freq_r
+        self.scale = scale
+        self.phi = phi
+
+    def compute_jitters(self):
+        '''Compute the jitter and output a dictionnary with all the jitter parameters'''
+
+        X = np.linspace(0, 1, num=self.size)
+        cos_X = np.cos(2*np.pi*self.freq*X + self.phi)
+        sin_X = np.sin(2*np.pi*self.freq*X + self.phi)
+        cos_R = np.cos(2*np.pi*self.freq_r*X + self.phi)
+        cos_X2 = cos_X/(1+sin_X**2)
+        sin_X2 = (cos_X*sin_X)/(1+sin_X**2)
+
+        self.jitter_x = self.amplitude * \
+            np.random.normal(cos_X2, scale=self.scale)
+        self.jitter_y = self.amplitude * \
+            np.random.normal(sin_X2, scale=self.scale)
+        self.jitter_r = self.amplitude_r * \
+            np.random.normal(cos_R, scale=self.scale)
+
+        return {'X': self.jitter_x, 'Y': self.jitter_y, 'R': self.jitter_r}
+
 # Class that creates frames
+
+
 class FrameBuilder():
     '''Class that creates frames with a background and some images'''
 
@@ -213,34 +249,31 @@ class JitterEnv():
         for f in range(self.frames):
 
             j_x, j_y, j_r = self.jitter_x[f], self.jitter_y[f], self.jitter_r[f]
-
-            # Rotation
-            current_map = rotate(self.map[f], angle=j_r)*255.
-            current_map = current_map.astype(np.uint8)
-
-            # Translation
             l1, l2 = int(self.crop_ratio*self.size), int(3 *
                                                          self.crop_ratio*self.size)
-            self.jitter_map[f] = current_map[j_x+l1:j_x+l2, j_y+l1:j_y+l2]
 
-            pass
+            tform = AffineTransform(scale=(1., 1.), rotation=j_r*np.pi/180,
+                                    translation=(j_x, j_y))
+
+            self.jitter_map[f] = 255.*warp(self.map[f], tform)[l1:l2, l1:l2]
 
     def compute_maps(self):
         self.compute_jittered_map()
         self.compute_crop_map()
 
-    def make_gif(self, path, fps=24):
+    def make_gif(self, path, fps=24, start=0):
 
         imageio.mimsave('map_'+path, [self.map[i]
-                                      for i in range(self.frames)], format='GIF', fps=fps)
+                                      for i in range(start, self.frames)], format='GIF', fps=fps)
         # imageio.mimsave('cen_'+path, [255*self.crop_map[i]
         #                              for i in range(self.frames)], format='GIF', fps=fps)
-        # imageio.mimsave('jit_'+path, [255*self.jitter_map[i]
-        #                              for i in range(self.frames)], format='GIF', fps=fps)
+        # imageio.mimsave('jit_'+path, [self.jitter_map[i]
+        #                               for i in range(self.frames)], format='GIF', fps=fps)
         imageio.mimsave(
-            'both_'+path, [np.concatenate((self.crop_map[i], self.jitter_map[i]), axis=1) for i in range(self.frames)], format='GIF', fps=fps)
+            'both_'+path, [np.concatenate((self.crop_map[i], self.jitter_map[i]), axis=1) for i in range(start, self.frames)], format='GIF', fps=fps)
 
     def plot_jitters(self, path):
+
         plt.figure(figsize=(8, 6))
         plt.title('Applied Jittters')
         plt.plot(self.jitter_x, label='Jitter X')
@@ -249,23 +282,13 @@ class JitterEnv():
         plt.xlabel('time step')
         plt.ylabel('pixel deviation')
         plt.savefig(path)
+        plt.close()
 
-
-if __name__ == '__main__':
-
-    # Compute the jitters
-    jt = Jitters()
-    jitters = jt.compute_jitters()
-
-    # Build random frames
-    rf = FrameBuilder(n_shapes=20, size=512, frames=1000,
-                      min_speed=0.1, max_speed=1, possible_radius=[10, 5, 15])
-    frames = rf.build_frames()
-
-    # Create jittered frames and plot the result
-    env = JitterEnv(frames, jitters)
-    env.compute_maps()
-    env.make_gif('video_frame.gif')
-    env.plot_jitters('jitters.png')
-
-    pass
+        plt.figure(figsize=(8, 6))
+        plt.title('Applied Rotation Jitters')
+        plt.plot(self.jitter_r, label='Jitter Rotation')
+        plt.legend()
+        plt.xlabel('time step')
+        plt.ylabel('angle deviation')
+        plt.savefig('rotation_'+path)
+        plt.close()
